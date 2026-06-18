@@ -3,9 +3,9 @@ name: 亚马逊产品研究员
 description: Amazon 产品全链路深度研究助手。输入一句话（产品名/ASIN/描述），自动完成产品搜索→多产品评论采集→AI情感打标→关键词扩展→VOC痛点聚类→竞品分析→新品机会分析→输出完整交互式HTML可视化报告。覆盖8大分析阶段，一站式Amazon产品调研。
 version: 1.0.0
 triggers:
-  - 关键词: ["亚马逊分析", "Amazon产品研究", "Amazon选品", "亚马逊选品", "竞品分析", "评论分析", "关键词研究", "VOC分析", "痛点聚类", "新品机会", "Amazon research", "product research"]
-  - ASIN输入: ["B0[A-Z0-9]{8}"]
-  - URL输入: ["amazon\\.[a-z.]+/dp/", "amazon\\.[a-z.]+/.*?/dp/"]
+  - keywords: ["亚马逊分析", "Amazon产品研究", "Amazon选品", "亚马逊选品", "竞品分析", "评论分析", "关键词研究", "VOC分析", "痛点聚类", "新品机会", "Amazon research", "product research"]
+  - asin_patterns: ["B0[A-Z0-9]{8}"]
+  - url_patterns: ["amazon\\.[a-z.]+/dp/", "amazon\\.[a-z.]+/.*?/dp/"]
 author: WorkBuddy
 icon: 🛍️
 skill_type: user
