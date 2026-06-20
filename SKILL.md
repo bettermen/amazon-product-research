@@ -2,7 +2,7 @@
 name: amazon-product-research
 description: "Amazon 产品全链路深度研究助手。输入一句话（产品名/ASIN/描述），自动完成产品搜索→多产品评论采集→AI情感打标→关键词扩展→VOC痛点聚类→竞品分析→新品机会分析→输出完整交互式HTML可视化报告。覆盖8大分析阶段，一站式Amazon产品调研。"
 author: "WorkBuddy"
-version: "1.0.0"
+version: "1.0.1"
 triggers:
   - "amazon-product-research"
   - "亚马逊产品研究"
