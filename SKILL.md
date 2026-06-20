@@ -1,171 +1,229 @@
 ---
-name: 亚马逊产品研究员
-description: Amazon 产品全链路深度研究助手。输入一句话（产品名/ASIN/描述），自动完成产品搜索→多产品评论采集→AI情感打标→关键词扩展→VOC痛点聚类→竞品分析→新品机会分析→输出完整交互式HTML可视化报告。覆盖8大分析阶段，一站式Amazon产品调研。
-version: 1.0.0
+name: amazon-product-research
+description: "Amazon 产品全链路深度研究助手。输入一句话（产品名/ASIN/描述），自动完成产品搜索→多产品评论采集→AI情感打标→关键词扩展→VOC痛点聚类→竞品分析→新品机会分析→输出完整交互式HTML可视化报告。覆盖8大分析阶段，一站式Amazon产品调研。"
+author: "WorkBuddy"
+version: "1.0.0"
 triggers:
-  - keywords: ["亚马逊分析", "Amazon产品研究", "Amazon选品", "亚马逊选品", "竞品分析", "评论分析", "关键词研究", "VOC分析", "痛点聚类", "新品机会", "Amazon research", "product research"]
-  - asin_patterns: ["B0[A-Z0-9]{8}"]
-  - url_patterns: ["amazon\\.[a-z.]+/dp/", "amazon\\.[a-z.]+/.*?/dp/"]
-author: WorkBuddy
-icon: 🛍️
-skill_type: user
-location: user
-allowed-tools:
-  - Read
-  - Write
-  - Bash
-  - WebFetch
-  - WebSearch
-  - Task
+  - "amazon-product-research"
+  - "亚马逊产品研究"
+  - "亚马逊产品分析"
+  - "Amazon产品调研"
+  - "选品分析"
+  - "竞品分析"
+  - "产品研究"
+  - "market research"
+agent_created: true
 ---
 
-# 🛍️ Amazon 产品研究员
+# 亚马逊产品研究员 (Amazon Product Research)
 
-> 一句话输入 → 全链路自动分析 → 完整交互式报告
+一句话描述，8步输出完整调研报告——竞品、关键词、痛点、机会，一个工具搞定。
 
----
+## 能做什么
 
-## 核心能力
+输入一句话（产品名/ASIN/描述词），自动完成：
 
-```
-输入: "bluetooth earbuds noise cancelling" 或 "B0CHX1W1XY" 或 "AirPods Pro 2"
-  ↓
-1️⃣  智能输入解析 —— 自动识别 ASIN/产品名/URL
-2️⃣  多产品评论采集 —— 主产品 + Top 5 竞品评论
-3️⃣  AI 深度打标 —— 情感/痛点/卖点/场景/用户画像 (10维标注)
-4️⃣  关键词研究 —— 评论词频 + Amazon Suggest 扩展 + 长尾词
-5️⃣  差评深度分析 —— 根因分析 + 严重度分级 + 改进优先级
-6️⃣  VOC 痛点聚类 —— 客户之声主题聚类 + 期望/需求挖掘
-7️⃣  竞品分析 —— 价格/评分/评论全维度对比 + 差距分析
-8️⃣  新品机会分析 —— 市场缺口/利基机会/风险评估/行动计划
-  ↓
-📊 输出: 交互式 HTML 可视化报告 (Chart.js 图表 + 可折叠面板)
-```
+1. 🔍 **产品搜索**：自然语言搜索Amazon产品，返回Top N竞品
+2. 📝 **多产品评论采集**：批量抓取每个产品的用户评论
+3. 🤖 **AI情感打标**：逐条评论提取情感/痛点/卖点/场景/画像
+4. 🔑 **关键词扩展**：基于真实评论，生成高频搜索词、长尾词、关联词
+5. 🎯 **VOC痛点聚类**：聚类用户痛点，按严重度和频率排序
+6. 📊 **竞品分析**：多产品横向对比，优劣矩阵+市场定位
+7. 💡 **新品机会分析**：识别市场空白，推荐新品切入方向
+8. 📄 **交互式HTML报告**：一键生成完整可视化报告
 
----
+## 与其他技能对比
 
-## 使用方式
+| 功能 | amazon-review-analyzer | **amazon-product-research** |
+|------|----------------------|---------------------------|
+| 输入方式 | 必须指定ASIN | **一句话自然语言** |
+| 分析范围 | 单个产品 | **多产品横向对比** |
+| 关键词扩展 | ❌ | ✅ |
+| VOC聚类 | ❌ | ✅ |
+| 竞品分析 | 基础 | **深度横向对比** |
+| 新品机会 | ❌ | ✅ |
+| 报告类型 | 单产品洞察 | **全链路调研报告** |
 
-### 基本用法
+## 快速开始
+
+### 1. 安装依赖
 
 ```bash
-# 产品名搜索
-python scripts/main.py "bluetooth earbuds"
-
-# ASIN 直接分析
-python scripts/main.py B0CHX1W1XY
-
-# 一句话描述
-python scripts/main.py "best noise cancelling headphones under 100"
+pip install -r ~/.workbuddy/skills/amazon-product-research/requirements.txt
 ```
 
-### 指定市场和AI
+### 2. 体验示例报告（无需API Key）
 
 ```bash
-# 指定市场 + API Key
-python scripts/main.py "kitchen knife set" --market UK --api-key sk-xxx
+python ~/.workbuddy/skills/amazon-product-research/scripts/research.py \
+  --query "bluetooth headphones under $50" \
+  --use-mock
+```
 
-# 使用 DeepSeek
-python scripts/main.py "smart watch" \
-  --api-key sk-xxx \
+### 3. 完整分析（需LLM API Key）
+
+```bash
+# DeepSeek（国内推荐）
+python ~/.workbuddy/skills/amazon-product-research/scripts/research.py \
+  --query "portable bluetooth speaker waterproof" \
+  --api-key YOUR_DEEPSEEK_KEY \
   --api-base https://api.deepseek.com/v1 \
   --model deepseek-chat
 
-# 输出到指定文件
-python scripts/main.py "yoga mat" --output my_report.html
-
-# 纯规则统计（无需API，速度更快）
-python scripts/main.py "phone case" --no-ai
-
-# 调试模式
-python scripts/main.py "headphones" --debug
+# OpenAI
+python ~/.workbuddy/skills/amazon-product-research/scripts/research.py \
+  --query "yoga mat non slip" \
+  --api-key YOUR_OPENAI_KEY
 ```
 
-### 在 WorkBuddy 对话中调用
+## 参数说明
 
-当用户说 "分析这个 Amazon 产品 B0CHX1W1XY" 或 "帮我研究 amazon 上的蓝牙耳机" 时，自动运行：
+| 参数 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| `--query` | ✅ | - | 搜索关键词/产品名/ASIN/描述 |
+| `--market` | ❌ | US | 市场区域：US/UK/DE/JP等 |
+| `--max-products` | ❌ | 5 | 最多分析的竞品数量 |
+| `--max-reviews` | ❌ | 100 | 每个产品最大评论数 |
+| `--api-key` | ❌ | - | LLM API Key（无Key则仅生成数据报告） |
+| `--api-base` | ❌ | https://api.openai.com/v1 | API Base URL |
+| `--model` | ❌ | gpt-4o-mini | 模型名称 |
+| `--output` | ❌ | ./product_research_{timestamp}.html | 输出路径 |
+| `--rapidapi-key` | ❌ | - | RapidAPI Key（可选） |
+| `--use-mock` | ❌ | False | 使用模拟数据演示 |
 
-```bash
-cd C:/Users/PC/.workbuddy/skills/amazon-product-research/scripts
-python main.py "<用户输入>" --output "<输出路径>"
-```
+## 输出报告内容
 
-然后 `present_files` 展示生成的 HTML 报告。
+生成的HTML报告包含以下8大板块：
 
----
-
-## 环境要求
-
-- Python 3.8+
-- `pip install -r requirements.txt` (仅需 requests)
-- AI 深度分析需要 OpenAI/DeepSeek 兼容 API Key（可选，无 Key 用规则统计）
-
----
-
-## 报告内容详解
-
-生成的 HTML 报告包含以下板块：
-
-| 板块 | 内容 |
-|------|------|
-| 📊 分析总览 | 综合评分、评论数、情感分布、机会评分 |
-| 💬 评论分析 | 评分分布图 (Chart.js)、情感饼图、打标明细表 |
-| 🔴 差评深度 | 根因分析、严重度分层 (Critical/Major/Minor)、改进优先级 |
-| 🔑 关键词研究 | 高频词柱状图、Amazon建议词云、长尾关键词 |
-| 🎯 VOC聚类 | 客户之声主题卡片、客户期望表、未满足需求 |
-| 🏪 竞品分析 | 市场概览、竞品对比表、价格/功能差距分析 |
-| 💡 新品机会 | 机会评分雷达、市场缺口卡、利基机会表、风险评估 |
-| 📋 行动计划 | 立即行动/短期计划/长期规划，含时间线和预期结果 |
-
----
+1. **研究概览**：搜索词、分析产品数、评论总数、评分分布总览
+2. **产品一览**：所有产品卡片（图片/价格/评分/链接）
+3. **评分与评论概览**：评分分布、情感分布、评论量对比
+4. **关键词扩展**：高频词云、长尾关键词、关联搜索词
+5. **VOC痛点聚类**：痛点分类树、严重度排序、典型评论引用
+6. **竞品对比矩阵**：多维度雷达图对比、优劣势一览表
+7. **新品机会分析**：市场空白识别、切入方向建议、风险提示
+8. **原始数据导出**：所有打标数据可下载（CSV格式）
 
 ## 技术架构
 
 ```
-main.py (入口)
-  ├── parse_input.py      # 智能输入解析 (ASIN/名称/URL识别 + Amazon搜索)
-  ├── fetch_multi.py      # 多产品评论爬虫 (主产品+N竞品)
-  ├── ai_analysis.py      # AI 分析引擎 (10维打标 + 差评根因 + VOC聚类)
-  ├── keyword_research.py # 关键词挖掘 (评论词频 + Amazon Suggest API)
-  ├── competitor.py       # 竞品分析 (搜索→对比→差距→定位)
-  ├── opportunity.py      # 机会分析 (缺口→利基→风险→行动计划)
-  ├── generate_report.py  # HTML报告生成 (Chart.js 交互式)
-  └── utils.py            # 共享工具 (文本处理/网络/统计)
+用户输入 "portable bluetooth speaker waterproof"
+    ↓
+┌─────────────────────────────────────────────────┐
+│ Stage 1: 产品搜索 (product_search.py)            │
+│  自然语言 → Amazon搜索 → Top N产品              │
+└─────────────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────────────┐
+│ Stage 2: 多产品评论采集 (fetch_reviews.py)       │
+│  对每个ASIN并行抓取评论                          │
+└─────────────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────────────┐
+│ Stage 3: AI情感打标 (ai_tagging.py)              │
+│  逐条评论 → 情感/痛点/卖点/场景/画像             │
+└─────────────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────────────┐
+│ Stage 4: 关键词扩展 (keyword_expansion.py)       │
+│  聚合评论 + LLM → 高频词/长尾词/关联词          │
+└─────────────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────────────┐
+│ Stage 5: VOC聚类 (voc_clustering.py)             │
+│  所有痛点 → LLM聚类 → 类别/严重度/频次          │
+└─────────────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────────────┐
+│ Stage 6: 竞品分析 (competitor_analysis.py)       │
+│  多产品横向对比 + LLM → 优劣矩阵/定位分析        │
+└─────────────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────────────┐
+│ Stage 7: 新品机会 (opportunity_analysis.py)      │
+│  VOC + 竞品差距 → LLM → 市场空白/新品方向        │
+└─────────────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────────────┐
+│ Stage 8: 报告生成 (generate_report.py)           │
+│  全部数据 → 交互式HTML + Chart.js图表            │
+└─────────────────────────────────────────────────┘
 ```
 
----
+## API Key 配置
 
-## AI 打标维度（10维）
+### LLM API（核心分析引擎）
+支持任何兼容OpenAI API格式的模型：
 
-每条评论 AI 提取以下信息：
+**OpenAI**
+```
+--api-key sk-xxx --api-base https://api.openai.com/v1 --model gpt-4o-mini
+```
 
-1. `sentiment` — 情感 (positive/negative/neutral)
-2. `pain_points` — 痛点列表 (最多5个)
-3. `selling_points` — 卖点列表 (最多5个)
-4. `use_cases` — 使用场景 (最多3个)
-5. `user_profile` — 用户画像一句话
-6. `improvement_suggestions` — 改进建议
-7. `emotion_intensity` — 情感强度 (1-5)
-8. `product_expectation` — 期望满足度 (met/exceeded/below)
-9. `repurchase_intent` — 复购意愿 (likely/unlikely/unsure)
-10. `summary` — 一句话摘要
+**DeepSeek（国内推荐）**
+```
+--api-key sk-xxx --api-base https://api.deepseek.com/v1 --model deepseek-chat
+```
 
----
+**DashScope（阿里云）**
+```
+--api-key sk-xxx --api-base https://dashscope.aliyuncs.com/compatible-mode/v1 --model qwen-plus
+```
+
+### RapidAPI Key（可选）
+用于获取真实Amazon数据。内置演示数据，无需Key即可体验流程。
+
+1. 访问 https://rapidapi.com/hub/amazon
+2. 订阅 "Amazon Products and Reviews" API
+3. 通过 `--rapidapi-key` 参数传入
 
 ## 注意事项
 
-1. **网络环境**: 中国用户可能需要代理访问 Amazon，建议配合 `HTTPS_PROXY` 环境变量
-2. **反爬策略**: 内置了延迟和重试机制，但大量请求仍可能触发验证码
-3. **API Key**: AI 分析可选，无 Key 时自动降级为规则统计（仍然可用但深度有限）
-4. **数据时效**: 报告基于采集时刻的数据，建议定期更新
-5. **合规使用**: 仅用于产品研究和学习，请遵守 Amazon 服务条款
+- ⏱️ **时间成本**：5产品×100评论 ≈ 10-20分钟（取决于LLM API速度）
+- 💰 **API成本**：gpt-4o-mini处理500条评论+4次综合分析 ≈ $0.25-0.50
+- 🚫 **数据源**：真实数据依赖RapidAPI，无Key时使用模拟数据演示
+- 📊 **报告大小**：HTML报告约500KB-2MB（含Chart.js图表）
 
----
+## 示例
 
-## 示例截图
+**分析"portable bluetooth speaker waterproof"市场**
+```bash
+python ~/.workbuddy/skills/amazon-product-research/scripts/research.py \
+  --query "portable bluetooth speaker waterproof" \
+  --market US \
+  --max-products 5 \
+  --max-reviews 100 \
+  --api-key YOUR_KEY \
+  --api-base https://api.deepseek.com/v1 \
+  --model deepseek-chat
+```
 
-(报告包含 Chart.js 交互式图表、可折叠面板、关键词云、竞品对比表等)
+**快速调研"yoga mat"品类（使用模拟数据）**
+```bash
+python ~/.workbuddy/skills/amazon-product-research/scripts/research.py \
+  --query "yoga mat non slip" \
+  --use-mock
+```
 
----
+## 常见问题
 
-*Built with ❤️ by WorkBuddy | 一句话全链路 Amazon 产品研究*
+**Q: 和amazon-review-analyzer有什么区别？**
+A: amazon-review-analyzer专注**单个ASIN的评论分析**（痛点/卖点/Listing优化），amazon-product-research做**全链路产品调研**（搜索→竞品→关键词→VOC→机会），适合选品调研和品类分析。
+
+**Q: 没有RapidAPI Key能用吗？**
+A: 可以！使用 `--use-mock` 参数，系统会生成逼真的模拟数据，让你体验完整流程。只有获取真实Amazon数据时才需要RapidAPI Key。
+
+**Q: 分析一个品类大概需要多久？**
+A: 使用模拟数据约30秒（含报告生成），使用真实API+LLM分析5产品×100评论约10-20分钟，取决于LLM API的并发能力。
+
+**Q: 报告能用手机看吗？**
+A: 可以，HTML报告是响应式设计，手机和平板都能正常查看。推荐桌面端查看以获得最佳体验。
+
+## 更新日志
+
+- **v1.0.0** (2026-06-20): 初始版本
+  - 8阶段全链路分析
+  - 自然语言搜索
+  - 多产品横向对比
+  - VOC聚类 + 新品机会分析
+  - 交互式HTML报告

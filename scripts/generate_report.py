@@ -1,736 +1,596 @@
 #!/usr/bin/env python3
 """
-一站式 Amazon 产品研究 HTML 报告生成器
-整合：产品概览、评论分析、关键词研究、VOC聚类、竞品分析、新品机会
+综合HTML报告生成模块
+8阶段全链路分析报告，交互式HTML + Chart.js可视化
 """
 
 import json
 import os
 from datetime import datetime
-from typing import Dict, List, Optional
-from utils import format_number, format_price, clean_text
+from typing import Dict, List
 
 
-def generate_full_report(
-    product_data: Dict,
-    tagged_reviews: List[Dict],
+def generate_html_report(
+    query: str,
+    market: str,
+    products: List[Dict],
+    tagged_reviews: Dict[str, List[Dict]],
     keyword_data: Dict,
     voc_data: Dict,
     competitor_data: Dict,
     opportunity_data: Dict,
-    negative_analysis: Dict = None,
-    output_path: str = "amazon_product_research.html",
-) -> str:
+    output_path: str,
+    debug: bool = False
+):
     """
-    生成全链路 HTML 报告
+    生成综合HTML报告
+
+    Args:
+        query: 原始搜索词
+        market: 市场代码
+        products: 产品列表
+        tagged_reviews: {asin: [{review, tags}, ...]}
+        keyword_data: 关键词扩展结果
+        voc_data: VOC聚类结果
+        competitor_data: 竞品分析结果
+        opportunity_data: 机会分析结果
+        output_path: 输出路径
+        debug: 调试模式
     """
-    
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    
-    # 计算统计数据
-    total_reviews = len(tagged_reviews)
-    primary_product = product_data.get("primary_product", {})
-    products = product_data.get("products", {})
-    primary_asin = product_data.get("primary_asin", "")
-    search_query = product_data.get("search_query", "")
-    
-    # 评分分布
-    rating_dist = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
-    positive = negative = neutral = 0
-    for item in tagged_reviews:
-        r = item["review"]
-        rating = int(r.get("rating", 0))
-        if rating in rating_dist:
-            rating_dist[rating] += 1
-        s = item["tags"].get("sentiment", "neutral")
-        if s == "positive":
-            positive += 1
-        elif s == "negative":
-            negative += 1
-        else:
-            neutral += 1
-    
-    total = max(sum(rating_dist.values()), 1)
-    avg_rating = sum(k * v for k, v in rating_dist.items()) / total
-    
-    # 构建 HTML
-    html = f"""<!DOCTYPE html>
+    if debug:
+        print(f"  Generating report: {output_path}")
+
+    # 统计数据
+    total_reviews = sum(len(r) for r in tagged_reviews.values())
+    total_products = len(products)
+
+    # 评分统计
+    ratings = []
+    sentiments = {"positive": 0, "negative": 0, "neutral": 0}
+    for reviews in tagged_reviews.values():
+        for item in reviews:
+            rating = item.get("review", {}).get("rating", 0)
+            if rating:
+                ratings.append(rating)
+            sentiments[item.get("tags", {}).get("sentiment", "neutral")] = sentiments.get(
+                item.get("tags", {}).get("sentiment", "neutral"), 0
+            ) + 1
+
+    avg_rating = round(sum(ratings) / max(len(ratings), 1), 1) if ratings else 0
+
+    # 准备JSON数据
+    data_json = json.dumps({
+        "query": query,
+        "products": products[:10],
+        "total_reviews": total_reviews,
+        "avg_rating": avg_rating,
+        "rating_dist": _rating_distribution(ratings),
+        "sentiment_dist": sentiments,
+        "keyword_data": keyword_data,
+        "voc_data": _simplify_voc(voc_data),
+        "competitor_data": _simplify_competitor(competitor_data),
+        "opportunity_data": opportunity_data,
+    }, ensure_ascii=False)
+
+    # 生成HTML
+    html = _build_html(query, market, total_products, total_reviews, avg_rating, data_json)
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    print(f"✅ 报告已生成: {output_path}")
+    return output_path
+
+
+def _rating_distribution(ratings: List) -> Dict:
+    dist = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+    for r in ratings:
+        bucket = int(r)
+        if bucket in dist:
+            dist[bucket] += 1
+    return dist
+
+
+def _simplify_voc(voc_data: Dict) -> Dict:
+    """简化VOC数据用于JSON序列化"""
+    if not voc_data:
+        return {"clusters": [], "overall_summary": ""}
+    return {
+        "clusters": voc_data.get("clusters", [])[:10],
+        "severity_summary": voc_data.get("severity_summary", {}),
+        "overall_summary": voc_data.get("overall_summary", "")
+    }
+
+
+def _simplify_competitor(competitor_data: Dict) -> Dict:
+    """简化竞品数据"""
+    if not competitor_data:
+        return {"comparison_matrix": [], "radar_dimensions": [], "market_gaps": [], "overall_summary": ""}
+    return {
+        "comparison_matrix": competitor_data.get("comparison_matrix", [])[:6],
+        "radar_dimensions": competitor_data.get("radar_dimensions", []),
+        "market_gaps": competitor_data.get("market_gaps", [])[:5],
+        "overall_summary": competitor_data.get("overall_summary", "")
+    }
+
+
+def _build_html(query: str, market: str, total_products: int, total_reviews: int, avg_rating: float, data_json: str) -> str:
+    """构建完整HTML"""
+
+    return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Amazon 产品深度研究报告 - {_safe(primary_product.get('title', 'Product Analysis'))}</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<title>Amazon产品研究报告: {query}</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; color: #333; line-height: 1.6; }}
-.container {{ max-width: 1200px; margin: 0 auto; padding: 20px; }}
+.container {{ max-width: 1200px; margin: 0 auto; padding: 0 20px; }}
 
-/* Header */
-.header {{ background: linear-gradient(135deg, #232f3e 0%, #37475a 100%); color: white; padding: 40px 30px; border-radius: 16px; margin-bottom: 24px; }}
-.header h1 {{ font-size: 28px; margin-bottom: 8px; }}
-.header .subtitle {{ opacity: 0.85; font-size: 14px; }}
-.header .product-info {{ display: flex; align-items: center; gap: 20px; margin-top: 20px; }}
-.header .product-info img {{ width: 120px; height: 120px; object-fit: contain; background: white; border-radius: 8px; padding: 8px; }}
-.header .product-info .meta {{ font-size: 14px; }}
-.header .product-info .meta span {{ display: inline-block; margin-right: 16px; opacity: 0.9; }}
-.header .product-info .meta .price {{ font-size: 24px; font-weight: 700; opacity: 1; }}
+/* Hero */
+.hero {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 50px 0 40px; margin-bottom: 30px; }}
+.hero h1 {{ font-size: 28px; margin-bottom: 8px; }}
+.hero .query {{ font-size: 16px; opacity: 0.9; margin-bottom: 20px; }}
+.stats-row {{ display: flex; gap: 20px; flex-wrap: wrap; }}
+.stat-card {{ background: rgba(255,255,255,0.15); backdrop-filter: blur(10px); border-radius: 12px; padding: 16px 24px; min-width: 140px; }}
+.stat-card .value {{ font-size: 28px; font-weight: 700; }}
+.stat-card .label {{ font-size: 12px; opacity: 0.8; }}
 
-/* Nav */
-.nav {{ display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; position: sticky; top: 0; background: #f5f7fa; padding: 12px 0; z-index: 100; }}
-.nav a {{ padding: 8px 16px; background: white; border-radius: 20px; text-decoration: none; color: #555; font-size: 13px; font-weight: 500; border: 1px solid #e0e0e0; transition: all 0.2s; }}
-.nav a:hover {{ background: #232f3e; color: white; border-color: #232f3e; }}
+/* Sections */
+.section {{ background: white; border-radius: 16px; padding: 32px; margin-bottom: 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }}
+.section h2 {{ font-size: 22px; margin-bottom: 20px; color: #1a1a2e; border-bottom: 3px solid #667eea; padding-bottom: 10px; display: inline-block; }}
+.section h3 {{ font-size: 16px; color: #555; margin: 16px 0 10px; }}
 
-/* Section */
-.section {{ background: white; border-radius: 12px; padding: 28px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }}
-.section h2 {{ font-size: 20px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 2px solid #ff9900; color: #232f3e; display: flex; align-items: center; gap: 8px; }}
-.section h3 {{ font-size: 16px; margin: 16px 0 8px; color: #444; }}
-
-/* Stats Grid */
-.stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 20px; }}
-.stat-card {{ background: #f8f9fb; border-radius: 10px; padding: 20px; text-align: center; border: 1px solid #eee; }}
-.stat-card .value {{ font-size: 28px; font-weight: 700; color: #232f3e; }}
-.stat-card .label {{ font-size: 12px; color: #888; margin-top: 4px; text-transform: uppercase; }}
-.stat-card.orange {{ border-color: #ff9900; }}
-.stat-card.green {{ border-color: #4caf50; }}
-.stat-card.red {{ border-color: #f44336; }}
+/* Product Cards */
+.product-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }}
+.product-card {{ border: 1px solid #e8ecf1; border-radius: 12px; padding: 16px; text-align: center; transition: transform 0.2s, box-shadow 0.2s; }}
+.product-card:hover {{ transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.1); }}
+.product-card img {{ width: 120px; height: 120px; object-fit: cover; border-radius: 8px; margin-bottom: 10px; background: #f0f0f0; }}
+.product-card .title {{ font-size: 13px; font-weight: 600; margin-bottom: 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }}
+.product-card .meta {{ font-size: 12px; color: #888; }}
+.product-card .price {{ font-size: 18px; font-weight: 700; color: #e74c3c; margin: 6px 0; }}
+.product-card .stars {{ color: #f39c12; }}
+.product-card a {{ display: inline-block; margin-top: 8px; font-size: 12px; color: #667eea; text-decoration: none; }}
 
 /* Charts */
-.chart-row {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }}
-.chart-container {{ position: relative; height: 300px; }}
+.chart-container {{ position: relative; margin: 20px 0; }}
+.chart-row {{ display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }}
 @media (max-width: 768px) {{ .chart-row {{ grid-template-columns: 1fr; }} }}
 
-/* Tables */
-table {{ width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }}
-th {{ background: #f0f2f5; padding: 10px 12px; text-align: left; font-weight: 600; color: #555; border-bottom: 2px solid #ddd; }}
-td {{ padding: 10px 12px; border-bottom: 1px solid #eee; }}
-tr:hover {{ background: #fafbfc; }}
-.badge {{ display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }}
-.badge-p0 {{ background: #ffebee; color: #c62828; }}
-.badge-p1 {{ background: #fff3e0; color: #e65100; }}
-.badge-p2 {{ background: #e8f5e9; color: #2e7d32; }}
-.badge-positive {{ background: #e8f5e9; color: #2e7d32; }}
-.badge-negative {{ background: #ffebee; color: #c62828; }}
-.badge-neutral {{ background: #f5f5f5; color: #757575; }}
+/* Keyword */
+.keyword-table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
+.keyword-table th {{ background: #f0f2f5; padding: 10px 12px; text-align: left; font-weight: 600; }}
+.keyword-table td {{ padding: 10px 12px; border-bottom: 1px solid #e8ecf1; }}
+.tag {{ display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }}
+.tag-high {{ background: #e8f5e9; color: #2e7d32; }}
+.tag-medium {{ background: #fff3e0; color: #e65100; }}
+.tag-low {{ background: #fce4ec; color: #c62828; }}
 
-/* Cards */
-.card-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }}
-.card {{ background: #f8f9fb; border-radius: 10px; padding: 16px; border: 1px solid #eee; }}
-.card h4 {{ font-size: 14px; color: #232f3e; margin-bottom: 8px; }}
-.card p {{ font-size: 13px; color: #666; line-height: 1.5; }}
+/* VOC */
+.voc-cluster {{ border-left: 4px solid #667eea; padding: 12px 16px; margin-bottom: 12px; background: #f8f9fc; border-radius: 0 8px 8px 0; }}
+.voc-cluster.critical {{ border-left-color: #e74c3c; }}
+.voc-cluster.major {{ border-left-color: #f39c12; }}
+.voc-cluster.minor {{ border-left-color: #3498db; }}
+.voc-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }}
+.voc-category {{ font-weight: 700; font-size: 15px; }}
+.voc-severity {{ padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; color: white; }}
+.sev-critical {{ background: #e74c3c; }}
+.sev-major {{ background: #f39c12; }}
+.sev-minor {{ background: #3498db; }}
 
-/* Keywords */
-.keyword-cloud {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }}
-.keyword-tag {{ padding: 5px 12px; border-radius: 16px; font-size: 12px; background: #e3f2fd; color: #1565c0; font-weight: 500; }}
-.keyword-tag.pain {{ background: #ffebee; color: #c62828; }}
-.keyword-tag.sell {{ background: #e8f5e9; color: #2e7d32; }}
+/* Competitor Table */
+.comp-table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
+.comp-table th {{ background: #f0f2f5; padding: 10px; text-align: left; }}
+.comp-table td {{ padding: 10px; border-bottom: 1px solid #e8ecf1; }}
+.score-bar {{ display: inline-block; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #667eea, #764ba2); }}
 
-/* Competitor */
-.comp-card {{ display: flex; align-items: center; gap: 16px; padding: 16px; background: #f8f9fb; border-radius: 10px; margin-bottom: 12px; border: 1px solid #eee; }}
-.comp-card img {{ width: 64px; height: 64px; object-fit: contain; background: white; border-radius: 6px; }}
-.comp-card .comp-info {{ flex: 1; }}
-.comp-card .comp-info .comp-title {{ font-weight: 600; margin-bottom: 4px; }}
-.comp-card .comp-info .comp-meta {{ font-size: 13px; color: #666; }}
-.comp-card .comp-rank {{ font-size: 24px; font-weight: 700; color: #ff9900; min-width: 40px; text-align: center; }}
+/* Opportunity */
+.opp-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }}
+.opp-card {{ border: 1px solid #e8ecf1; border-radius: 12px; padding: 20px; }}
+.opp-score {{ display: inline-block; width: 40px; height: 40px; line-height: 40px; text-align: center; border-radius: 50%; font-weight: 700; color: white; font-size: 18px; }}
+.score-high {{ background: #27ae60; }}
+.score-mid {{ background: #f39c12; }}
+.opp-title {{ font-size: 16px; font-weight: 700; margin: 10px 0 6px; }}
+.opp-desc {{ font-size: 13px; color: #666; margin-bottom: 10px; }}
+.opp-meta {{ display: flex; gap: 8px; flex-wrap: wrap; font-size: 12px; }}
 
-/* Priorities */
-.priority-list {{ list-style: none; }}
-.priority-list li {{ padding: 10px 12px; margin: 6px 0; background: #f8f9fb; border-radius: 8px; border-left: 4px solid #ddd; font-size: 14px; }}
-.priority-list li.p0 {{ border-left-color: #f44336; }}
-.priority-list li.p1 {{ border-left-color: #ff9800; }}
-.priority-list li.p2 {{ border-left-color: #4caf50; }}
+/* Summary Box */
+.summary-box {{ background: linear-gradient(135deg, #f0f2ff 0%, #f5f0ff 100%); border-radius: 12px; padding: 20px 24px; margin: 16px 0; font-size: 15px; }}
 
-/* Footer */
-.footer {{ text-align: center; padding: 30px; color: #999; font-size: 12px; }}
+/* TOC / Nav */
+.toc {{ position: sticky; top: 0; background: white; z-index: 100; padding: 12px 0; border-bottom: 1px solid #e8ecf1; margin-bottom: 24px; }}
+.toc-inner {{ display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; }}
+.toc a {{ color: #667eea; text-decoration: none; padding: 4px 8px; border-radius: 6px; }}
+.toc a:hover {{ background: #f0f2ff; }}
 
-/* Collapsible */
-.collapsible {{ cursor: pointer; user-select: none; }}
-.collapsible::after {{ content: ' ▼'; font-size: 12px; color: #999; }}
-.collapsed::after {{ content: ' ▶'; }}
-.collapse-content {{ display: block; }}
-.collapse-content.hidden {{ display: none; }}
+/* Responsive */
+@media (max-width: 768px) {{
+  .stats-row {{ gap: 10px; }}
+  .stat-card {{ min-width: 100px; padding: 12px 16px; }}
+  .stat-card .value {{ font-size: 22px; }}
+  .section {{ padding: 20px; }}
+  .product-grid {{ grid-template-columns: repeat(2, 1fr); }}
+  .opp-grid {{ grid-template-columns: 1fr; }}
+}}
+
+/* Print */
+@media print {{
+  body {{ background: white; }}
+  .hero {{ background: #667eea !important; -webkit-print-color-adjust: exact; }}
+  .section {{ box-shadow: none; border: 1px solid #ddd; page-break-inside: avoid; }}
+}}
 </style>
 </head>
 <body>
 
+<div class="hero">
+  <div class="container">
+    <h1>Amazon产品研究报告</h1>
+    <div class="query">搜索词: <strong>{query}</strong> | 市场: {market}</div>
+    <div class="stats-row">
+      <div class="stat-card"><div class="value">{total_products}</div><div class="label">分析产品</div></div>
+      <div class="stat-card"><div class="value">{total_reviews}</div><div class="label">分析评论</div></div>
+      <div class="stat-card"><div class="value">{avg_rating}</div><div class="label">平均评分</div></div>
+      <div class="stat-card"><div class="value">{datetime.now().strftime('%Y-%m-%d')}</div><div class="label">生成日期</div></div>
+    </div>
+  </div>
+</div>
+
 <div class="container">
 
-<!-- Header -->
-<div class="header">
-    <h1>🛍️ Amazon 产品深度研究报告</h1>
-    <div class="subtitle">一句话输入 · 全链路分析 · 生成时间: {now}</div>
-    <div class="product-info">
-        <img src="{_safe(primary_product.get('image_url', ''))}" alt="Product" onerror="this.style.display='none'">
-        <div class="meta">
-            <div style="font-size:18px;font-weight:600;margin-bottom:8px;">{_safe(primary_product.get('title', search_query))}</div>
-            <span>ASIN: {primary_asin}</span>
-            <span class="price">{_safe(primary_product.get('price', 'N/A'))}</span>
-            <span>⭐ {primary_product.get('rating', '-')}</span>
-            <span>📝 {format_number(primary_product.get('total_reviews', 0))} reviews</span>
-            <br>
-            <span>市场: {product_data.get('market', 'US')}</span>
-            <span>搜索词: "{search_query}"</span>
-        </div>
-    </div>
+<div class="toc"><div class="toc-inner container">
+  <a href="#products">产品一览</a>
+  <a href="#reviews">评论分析</a>
+  <a href="#keywords">关键词扩展</a>
+  <a href="#voc">VOC痛点聚类</a>
+  <a href="#competitors">竞品对比</a>
+  <a href="#opportunities">新品机会</a>
+  <a href="#summary">综合总结</a>
+</div></div>
+
+<div id="products" class="section">
+  <h2>产品一览</h2>
+  <div class="product-grid" id="productGrid"></div>
 </div>
 
-<!-- Nav -->
-<div class="nav">
-    <a href="#overview">📊 总览</a>
-    <a href="#reviews">💬 评论分析</a>
-    <a href="#negative">🔴 差评深度</a>
-    <a href="#keywords">🔑 关键词研究</a>
-    <a href="#voc">🎯 VOC聚类</a>
-    <a href="#competitors">🏪 竞品分析</a>
-    <a href="#opportunity">💡 新品机会</a>
-    <a href="#action">📋 行动计划</a>
+<div id="reviews" class="section">
+  <h2>评论与评分概览</h2>
+  <div class="chart-row">
+    <div><h3>评分分布</h3><div class="chart-container"><canvas id="ratingChart"></canvas></div></div>
+    <div><h3>情感分布</h3><div class="chart-container"><canvas id="sentimentChart"></canvas></div></div>
+  </div>
+  <div class="summary-box" id="reviewSummary"></div>
 </div>
 
-<!-- Section 1: Overview -->
-<div class="section" id="overview">
-    <h2>📊 分析总览</h2>
-    <div class="stats-grid">
-        <div class="stat-card orange">
-            <div class="value">{avg_rating:.1f} ⭐</div>
-            <div class="label">综合评分</div>
-        </div>
-        <div class="stat-card">
-            <div class="value">{format_number(total_reviews)}</div>
-            <div class="label">分析评论数</div>
-        </div>
-        <div class="stat-card green">
-            <div class="value">{positive * 100 // max(total, 1)}%</div>
-            <div class="label">正面评论</div>
-        </div>
-        <div class="stat-card red">
-            <div class="value">{negative * 100 // max(total, 1)}%</div>
-            <div class="label">负面评论</div>
-        </div>
-    </div>
-    
-    <div class="stats-grid">
-        <div class="stat-card">
-            <div class="value">{format_number(len(keyword_data.get('high_frequency_keywords', [])))}</div>
-            <div class="label">关键词提取</div>
-        </div>
-        <div class="stat-card">
-            <div class="value">{format_number(len(competitor_data.get('competitors', [])))}</div>
-            <div class="label">竞品分析</div>
-        </div>
-        <div class="stat-card orange">
-            <div class="value">{opportunity_data.get('opportunity_scores', {}).get('overall_score', '-')}/10</div>
-            <div class="label">机会评分</div>
-        </div>
-        <div class="stat-card">
-            <div class="value">{len(opportunity_data.get('niche_opportunities', []))}</div>
-            <div class="label">利基机会</div>
-        </div>
-    </div>
+<div id="keywords" class="section">
+  <h2>关键词扩展</h2>
+  <h3>高频搜索词</h3>
+  <table class="keyword-table"><thead><tr><th>关键词</th><th>搜索频度</th><th>来源</th><th>预估月搜索量</th></tr></thead><tbody id="kwHighFreq"></tbody></table>
+  <h3>长尾关键词</h3>
+  <table class="keyword-table"><thead><tr><th>长尾词</th><th>搜索量</th><th>竞争度</th><th>转化潜力</th></tr></thead><tbody id="kwLongTail"></tbody></table>
+  <h3>关联词汇</h3>
+  <table class="keyword-table"><thead><tr><th>词汇</th><th>关联类型</th><th>权重</th></tr></thead><tbody id="kwRelated"></tbody></table>
+  <div class="summary-box" id="kwSummary"></div>
 </div>
 
-<!-- Section 2: Reviews -->
-<div class="section" id="reviews">
-    <h2>💬 评论分析</h2>
-    <div class="chart-row">
-        <div>
-            <h3>评分分布</h3>
-            <div class="chart-container">
-                <canvas id="ratingChart"></canvas>
-            </div>
-        </div>
-        <div>
-            <h3>情感分布</h3>
-            <div class="chart-container">
-                <canvas id="sentimentChart"></canvas>
-            </div>
-        </div>
-    </div>
-    {_render_tagged_reviews_table(tagged_reviews[:20])}
+<div id="voc" class="section">
+  <h2>VOC痛点聚类</h2>
+  <div id="vocClusters"></div>
+  <div class="summary-box" id="vocSummary"></div>
 </div>
 
-<!-- Section 3: Negative Review Deep Dive -->
-<div class="section" id="negative">
-    <h2>🔴 差评深度分析</h2>
-    {_render_negative_analysis(negative_analysis, tagged_reviews)}
+<div id="competitors" class="section">
+  <h2>竞品对比矩阵</h2>
+  <div class="chart-row">
+    <div><h3>多维度雷达图对比</h3><div class="chart-container"><canvas id="radarChart"></canvas></div></div>
+    <div><h3>市场空白</h3><div id="marketGaps"></div></div>
+  </div>
+  <h3>竞品详细对比</h3>
+  <div style="overflow-x:auto;">
+    <table class="comp-table"><thead><tr><th>产品</th><th>价格</th><th>质量</th><th>性价比</th><th>功能</th><th>满意度</th><th>品牌力</th><th>定位</th></tr></thead><tbody id="compTable"></tbody></table>
+  </div>
+  <div class="summary-box" id="compSummary"></div>
 </div>
 
-<!-- Section 4: Keywords -->
-<div class="section" id="keywords">
-    <h2>🔑 关键词研究与扩展</h2>
-    <div class="chart-row">
-        <div>
-            <h3>高频关键词 TOP20</h3>
-            <div class="chart-container">
-                <canvas id="keywordChart"></canvas>
-            </div>
-        </div>
-        <div>
-            <h3>Amazon 搜索建议</h3>
-            <div class="keyword-cloud">
-                {_render_keyword_cloud(keyword_data.get('amazon_suggest_keywords', []))}
-            </div>
-            <h3 style="margin-top:20px;">长尾关键词机会</h3>
-            <div class="keyword-cloud">
-                {_render_keyword_cloud(keyword_data.get('long_tail_keywords', []), 'keyword-tag')}
-            </div>
-        </div>
-    </div>
-    {_render_recommended_keywords(keyword_data.get('recommended_keywords', {}))}
+<div id="opportunities" class="section">
+  <h2>新品机会分析</h2>
+  <div class="opp-grid" id="oppGrid"></div>
+  <div style="margin-top:16px;">
+    <h3>最推荐方向</h3>
+    <div class="summary-box" id="topRec"></div>
+  </div>
+  <div class="summary-box" id="oppSummary"></div>
 </div>
 
-<!-- Section 5: VOC -->
-<div class="section" id="voc">
-    <h2>🎯 VOC 客户之声聚类</h2>
-    {_render_voc_clusters(voc_data)}
+<div id="summary" class="section" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+  <h2 style="color: white; border-bottom-color: rgba(255,255,255,0.4);">综合总结</h2>
+  <div id="finalSummary" style="font-size: 16px; line-height: 1.8;"></div>
 </div>
 
-<!-- Section 6: Competitors -->
-<div class="section" id="competitors">
-    <h2>🏪 竞品分析</h2>
-    {_render_market_overview(competitor_data.get('market_overview', {}))}
-    {_render_competitors_table(competitor_data.get('competitors', []), competitor_data.get('competitive_position', {}))}
-    {_render_gap_analysis(competitor_data.get('gap_analysis', {}))}
-</div>
-
-<!-- Section 7: Opportunity -->
-<div class="section" id="opportunity">
-    <h2>💡 新品机会分析</h2>
-    {_render_opportunity_scores(opportunity_data.get('opportunity_scores', {}))}
-    {_render_market_gaps(opportunity_data.get('market_gaps', []))}
-    {_render_niche_opportunities(opportunity_data.get('niche_opportunities', []))}
-    {_render_risk_assessment(opportunity_data.get('risk_assessment', {}))}
-</div>
-
-<!-- Section 8: Action Plan -->
-<div class="section" id="action">
-    <h2>📋 行动计划</h2>
-    {_render_action_plan(opportunity_data.get('action_plan', {}))}
-</div>
-
-<div class="footer">
-    <p>Generated by Amazon Product Research Skill · WorkBuddy AI</p>
-    <p>报告基于真实评论数据和 AI 分析生成，仅供参考</p>
+<div style="text-align:center; padding: 40px 20px; color: #999; font-size: 13px;">
+  <p>Powered by WorkBuddy Amazon Product Research | 数据来源: Amazon (via RapidAPI)</p>
+  <p>报告生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
 </div>
 
 </div>
 
 <script>
-// Rating Distribution Chart
-new Chart(document.getElementById('ratingChart'), {{
+// ========== DATA ==========
+const RAW_DATA = {data_json};
+
+// ========== PRODUCT GRID ==========
+(function() {{
+  const grid = document.getElementById('productGrid');
+  const products = RAW_DATA.products || [];
+  products.forEach(p => {{
+    const card = document.createElement('div');
+    card.className = 'product-card';
+    card.innerHTML = `
+      <img src="${{p.image_url || 'https://via.placeholder.com/300x300/EEE/999'}}" alt="${{p.title}}" onerror="this.src='https://via.placeholder.com/300x300/EEE/999?text=No+Image'">
+      <div class="title">${{p.title}}</div>
+      <div class="stars">${{'⭐'.repeat(Math.round(p.rating || 0))}} ${{p.rating}}</div>
+      <div class="price">${{p.price || 'N/A'}}</div>
+      <div class="meta">${{(p.total_reviews || 0).toLocaleString()}} 条评论</div>
+      <a href="${{p.url}}" target="_blank">查看详情 →</a>
+    `;
+    grid.appendChild(card);
+  }});
+}})();
+
+// ========== RATING CHART ==========
+(function() {{
+  const dist = RAW_DATA.rating_dist || {{}};
+  const ctx = document.getElementById('ratingChart').getContext('2d');
+  new Chart(ctx, {{
     type: 'bar',
     data: {{
-        labels: ['1★', '2★', '3★', '4★', '5★'],
-        datasets: [{{
-            label: '评论数',
-            data: [{rating_dist[1]}, {rating_dist[2]}, {rating_dist[3]}, {rating_dist[4]}, {rating_dist[5]}],
-            backgroundColor: ['#ef5350', '#ff7043', '#ffca28', '#66bb6a', '#43a047'],
-            borderRadius: 6,
-        }}]
+      labels: ['1星','2星','3星','4星','5星'],
+      datasets: [{{
+        label: '评论数',
+        data: [dist[1]||0, dist[2]||0, dist[3]||0, dist[4]||0, dist[5]||0],
+        backgroundColor: ['#e74c3c','#e67e22','#f1c40f','#2ecc71','#27ae60'],
+        borderRadius: 6
+      }}]
     }},
-    options: {{ responsive: true, maintainAspectRatio: false,
-        plugins: {{ legend: {{ display: false }} }},
-        scales: {{ y: {{ beginAtZero: true, ticks: {{ stepSize: 1 }} }} }}
+    options: {{
+      responsive: true,
+      plugins: {{ legend: {{ display: false }} }},
+      scales: {{ y: {{ beginAtZero: true, ticks: {{ stepSize: 1 }} }} }}
     }}
-}});
+  }});
+}})();
 
-// Sentiment Distribution Chart
-new Chart(document.getElementById('sentimentChart'), {{
+// ========== SENTIMENT CHART ==========
+(function() {{
+  const sent = RAW_DATA.sentiment_dist || {{}};
+  const ctx = document.getElementById('sentimentChart').getContext('2d');
+  new Chart(ctx, {{
     type: 'doughnut',
     data: {{
-        labels: ['正面', '负面', '中性'],
-        datasets: [{{
-            data: [{positive}, {negative}, {neutral}],
-            backgroundColor: ['#43a047', '#ef5350', '#90a4ae'],
-            borderWidth: 0,
-        }}]
+      labels: ['正面','负面','中性'],
+      datasets: [{{
+        data: [sent.positive||0, sent.negative||0, sent.neutral||0],
+        backgroundColor: ['#27ae60','#e74c3c','#95a5a6'],
+        borderWidth: 2,
+        borderColor: '#fff'
+      }}]
     }},
-    options: {{ responsive: true, maintainAspectRatio: false,
-        plugins: {{ legend: {{ position: 'bottom' }} }}
+    options: {{
+      responsive: true,
+      plugins: {{
+        legend: {{ position: 'bottom' }}
+      }}
     }}
-}});
+  }});
+  // Summary
+  const total = (sent.positive||0)+(sent.negative||0)+(sent.neutral||0);
+  const posPct = total > 0 ? Math.round((sent.positive||0)/total*100) : 0;
+  document.getElementById('reviewSummary').innerHTML = `共分析 ${{total.toLocaleString()}} 条评论，好评率 ${{posPct}}%，平均评分 ${{RAW_DATA.avg_rating}}。`;
+}})();
 
-// Keywords Chart
-new Chart(document.getElementById('keywordChart'), {{
-    type: 'bar',
-    data: {{
-        labels: {json.dumps([w for w, _ in keyword_data.get('high_frequency_keywords', [])[:15]])},
-        datasets: [{{
-            label: '出现频率',
-            data: {json.dumps([c for _, c in keyword_data.get('high_frequency_keywords', [])[:15]])},
-            backgroundColor: '#42a5f5',
-            borderRadius: 4,
-        }}]
-    }},
-    options: {{ 
-        indexAxis: 'y',
-        responsive: true, maintainAspectRatio: false,
-        plugins: {{ legend: {{ display: false }} }},
-        scales: {{ x: {{ beginAtZero: true }} }}
+// ========== KEYWORD TABLES ==========
+(function() {{
+  const kd = RAW_DATA.keyword_data || {{}};
+
+  // High frequency
+  const hfBody = document.getElementById('kwHighFreq');
+  (kd.high_frequency_keywords || []).forEach(kw => {{
+    const freqClass = kw.frequency === 'very_high' ? 'tag-high' : kw.frequency === 'high' ? 'tag-high' : 'tag-medium';
+    hfBody.innerHTML += `<tr>
+      <td><strong>${{kw.keyword}}</strong></td>
+      <td><span class="tag ${{freqClass}}">${{kw.frequency || 'medium'}}</span></td>
+      <td>${{kw.source || '-'}}</td>
+      <td>${{(kw.monthly_searches_estimate || '-').toLocaleString()}}</td>
+    </tr>`;
+  }});
+
+  // Long tail
+  const ltBody = document.getElementById('kwLongTail');
+  (kd.long_tail_keywords || []).forEach(kw => {{
+    ltBody.innerHTML += `<tr>
+      <td><strong>${{kw.keyword}}</strong></td>
+      <td><span class="tag tag-${{kw.volume === 'high' ? 'high' : 'medium'}}">${{kw.volume}}</span></td>
+      <td><span class="tag tag-${{kw.competition === 'low' ? 'high' : 'medium'}}">${{kw.competition}}</span></td>
+      <td>${{kw.conversion_potential || '-'}}</td>
+    </tr>`;
+  }});
+
+  // Related
+  const relBody = document.getElementById('kwRelated');
+  (kd.related_terms || []).forEach(t => {{
+    relBody.innerHTML += `<tr>
+      <td>${{t.term}}</td>
+      <td>${{t.relation}}</td>
+      <td>${{t.weight ? (t.weight*100).toFixed(0)+'%' : '-'}}</td>
+    </tr>`;
+  }});
+
+  document.getElementById('kwSummary').innerHTML = kd.summary || '';
+}})();
+
+// ========== VOC CLUSTERS ==========
+(function() {{
+  const voc = RAW_DATA.voc_data || {{}};
+  const container = document.getElementById('vocClusters');
+  const clusters = voc.clusters || [];
+
+  clusters.forEach(c => {{
+    const sevClass = c.severity >= 8 ? 'critical' : c.severity >= 5 ? 'major' : 'minor';
+    const sevLabel = c.severity >= 8 ? 'critical' : c.severity >= 5 ? 'major' : 'minor';
+    const sevTag = c.severity >= 8 ? 'sev-critical' : c.severity >= 5 ? 'sev-major' : 'sev-minor';
+
+    const pains = (c.pain_points || []).map(p => `<span style="display:inline-block;background:#f0f0f0;padding:2px 8px;border-radius:4px;margin:2px;font-size:12px;">${{p}}</span>`).join(' ');
+    const quotes = (c.typical_reviews || []).slice(0, 2).map(q => `<blockquote style="border-left:3px solid #ddd;margin:6px 0;padding:4px 12px;font-size:12px;color:#666;">"${{q}}"</blockquote>`).join('');
+
+    container.innerHTML += `
+    <div class="voc-cluster ${{sevClass}}">
+      <div class="voc-header">
+        <span class="voc-category">${{c.category}}</span>
+        <span class="voc-severity ${{sevTag}}">严重度: ${{c.severity}}/10 | 出现 ${{c.frequency || 0}}次</span>
+      </div>
+      <div>${{pains}}</div>
+      ${{quotes}}
+      <div style="font-size:12px;color:#888;margin-top:4px;">改进方向: ${{c.improvement_direction || '-'}}</div>
+    </div>`;
+  }});
+
+  document.getElementById('vocSummary').innerHTML = voc.overall_summary || '';
+}})();
+
+// ========== COMPETITOR RADAR ==========
+(function() {{
+  const comp = RAW_DATA.competitor_data || {{}};
+  const matrix = comp.comparison_matrix || [];
+  const dims = comp.radar_dimensions || ['quality','value_for_money','features','customer_satisfaction','brand_power'];
+
+  if (matrix.length === 0) return;
+
+  const colors = ['#667eea','#e74c3c','#27ae60','#f39c12','#3498db','#9b59b6'];
+  const datasets = matrix.map((m, i) => ({{
+    label: m.title ? m.title.substring(0, 25) : 'Product '+(i+1),
+    data: dims.map(d => (m.scores || {{}})[d] || 5),
+    borderColor: colors[i % colors.length],
+    backgroundColor: colors[i % colors.length] + '20',
+    borderWidth: 2
+  }}));
+
+  const ctx = document.getElementById('radarChart').getContext('2d');
+  new Chart(ctx, {{
+    type: 'radar',
+    data: {{ labels: dims.map(d => d.replace(/_/g,' ').replace(/\\b\\w/g, c=>c.toUpperCase())), datasets: datasets }},
+    options: {{
+      responsive: true,
+      scales: {{ r: {{ beginAtZero: true, max: 10, ticks: {{ stepSize: 2 }} }} }},
+      plugins: {{ legend: {{ position: 'bottom', labels: {{ font: {{ size: 11 }} }} }} }}
     }}
-}});
+  }});
 
-// Collapsible sections
-document.querySelectorAll('.collapsible').forEach(el => {{
-    el.addEventListener('click', () => {{
-        el.classList.toggle('collapsed');
-        const content = el.nextElementSibling;
-        if (content) content.classList.toggle('hidden');
-    }});
-}});
+  // Comparison table
+  const tbody = document.getElementById('compTable');
+  matrix.forEach(m => {{
+    const scores = m.scores || {{}};
+    tbody.innerHTML += `<tr>
+      <td style="font-size:12px;">${{(m.title||'').substring(0, 40)}}</td>
+      <td>${{m.price || '-'}}</td>
+      <td><span class="score-bar" style="width:${{(scores.quality||0)*12}}px;"></span> ${{scores.quality||'-'}}</td>
+      <td><span class="score-bar" style="width:${{(scores.value_for_money||0)*12}}px;"></span> ${{scores.value_for_money||'-'}}</td>
+      <td><span class="score-bar" style="width:${{(scores.features||0)*12}}px;"></span> ${{scores.features||'-'}}</td>
+      <td><span class="score-bar" style="width:${{(scores.customer_satisfaction||0)*12}}px;"></span> ${{scores.customer_satisfaction||'-'}}</td>
+      <td><span class="score-bar" style="width:${{(scores.brand_power||0)*12}}px;"></span> ${{scores.brand_power||'-'}}</td>
+      <td><span class="tag tag-${{m.positioning === '高端旗舰' ? 'low' : 'high'}}">${{m.positioning || '-'}}</span></td>
+    </tr>`;
+  }});
+
+  // Market gaps
+  const gapsDiv = document.getElementById('marketGaps');
+  (comp.market_gaps || []).forEach(g => {{
+    gapsDiv.innerHTML += `<div style="padding:8px;margin-bottom:8px;background:#f8f9fc;border-radius:8px;font-size:13px;">
+      <strong>${{g.description || g}}</strong>
+      ${{g.opportunity_score ? '<span style="float:right;color:#667eea;">机会评分: '+g.opportunity_score+'/10</span>' : ''}}
+    </div>`;
+  }});
+
+  document.getElementById('compSummary').innerHTML = comp.overall_summary || '';
+}})();
+
+// ========== OPPORTUNITIES ==========
+(function() {{
+  const opp = RAW_DATA.opportunity_data || {{}};
+  const grid = document.getElementById('oppGrid');
+  const opportunities = opp.opportunities || [];
+
+  opportunities.forEach(o => {{
+    const scoreClass = o.opportunity_score >= 8 ? 'score-high' : o.opportunity_score >= 6 ? 'score-mid' : 'score-high';
+    grid.innerHTML += `
+    <div class="opp-card">
+      <div class="opp-score ${{scoreClass}}">${{o.opportunity_score || '?'}}</div>
+      <div class="opp-title">${{o.title}}</div>
+      <div class="opp-desc">${{o.description}}</div>
+      <div class="opp-meta">
+        <span class="tag tag-high">市场: ${{o.target_market || '-'}}</span>
+        <span class="tag tag-medium">需求: ${{o.estimated_demand || '-'}}</span>
+        <span class="tag tag-low">竞争: ${{o.competitive_intensity || '-'}}</span>
+        <span class="tag">价位: ${{o.price_range || '-'}}</span>
+        <span class="tag">难度: ${{o.entry_difficulty || '-'}}</span>
+      </div>
+      <div style="font-size:12px;margin-top:8px;color:#666;">
+        <strong>差异化:</strong> ${{o.key_differentiator || '-'}}<br>
+        <strong>风险:</strong> ${{(o.risks || []).join(', ')}}
+      </div>
+    </div>`;
+  }});
+
+  // Top recommendation
+  const rec = opp.top_recommendation || {{}};
+  let recHtml = `<p><strong>推荐方向:</strong> ${{rec.direction || '-'}}</p>`;
+  recHtml += `<p><strong>理由:</strong> ${{rec.reasoning || '-'}}</p>`;
+  if (rec.action_items) {{
+    recHtml += '<p><strong>行动项:</strong></p><ul style="font-size:14px;margin-left:20px;">';
+    rec.action_items.forEach(a => {{ recHtml += `<li>${{a}}</li>`; }});
+    recHtml += '</ul>';
+  }}
+  document.getElementById('topRec').innerHTML = recHtml;
+
+  document.getElementById('oppSummary').innerHTML = `
+    <p><strong>风险评估:</strong> ${{opp.risk_assessment || '-'}}</p>
+    <p>${{opp.summary || ''}}</p>
+  `;
+}})();
+
+// ========== FINAL SUMMARY ==========
+(function() {{
+  const voc = RAW_DATA.voc_data || {{}};
+  const comp = RAW_DATA.competitor_data || {{}};
+  const opp = RAW_DATA.opportunity_data || {{}};
+  const kd = RAW_DATA.keyword_data || {{}};
+
+  let summary = `<p>基于对 <strong>${{RAW_DATA.total_reviews.toLocaleString()}}</strong> 条评论的AI深度分析，我们发现了以下关键洞察：</p>`;
+
+  if (voc.overall_summary) {{
+    summary += `<p>🔴 <strong>VOC核心发现:</strong> ${{voc.overall_summary}}</p>`;
+  }}
+
+  if (comp.overall_summary) {{
+    summary += `<p>📊 <strong>竞争格局:</strong> ${{comp.overall_summary}}</p>`;
+  }}
+
+  if (opp.summary) {{
+    summary += `<p>💡 <strong>机会建议:</strong> ${{opp.summary}}</p>`;
+  }}
+
+  if (kd.summary) {{
+    summary += `<p>🔑 <strong>关键词策略:</strong> ${{kd.summary}}</p>`;
+  }}
+
+  document.getElementById('finalSummary').innerHTML = summary;
+}})();
 </script>
 
 </body>
 </html>"""
-    
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(html)
-    
-    return output_path
-
-
-def _safe(text):
-    """安全处理文本"""
-    if not text:
-        return ""
-    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
-
-
-def _render_tagged_reviews_table(tagged_reviews: List[Dict]) -> str:
-    """渲染评论表格"""
-    if not tagged_reviews:
-        return "<p>暂无评论数据</p>"
-    
-    rows = ""
-    for item in tagged_reviews[:20]:
-        r = item["review"]
-        t = item["tags"]
-        sentiment = t.get("sentiment", "neutral")
-        badge_class = f"badge-{sentiment}"
-        
-        rows += f"""<tr>
-            <td>{r.get('rating', '-')}★</td>
-            <td><span class="badge {badge_class}">{sentiment}</span></td>
-            <td>{_safe(r.get('title', ''))[:50]}</td>
-            <td>{_safe(t.get('summary', ''))}</td>
-            <td>{_safe(', '.join(t.get('pain_points', [])[:3]))}</td>
-            <td>{_safe(', '.join(t.get('selling_points', [])[:3]))}</td>
-        </tr>"""
-    
-    return f"""<div class="collapsible"><h3>评论打标明细 (前20条)</h3></div>
-    <div class="collapse-content">
-    <table>
-        <tr><th>评分</th><th>情感</th><th>标题</th><th>摘要</th><th>痛点</th><th>卖点</th></tr>
-        {rows}
-    </table>
-    </div>"""
-
-
-def _render_negative_analysis(negative_analysis: Dict, tagged_reviews: List[Dict]) -> str:
-    """渲染差评分析"""
-    if not negative_analysis:
-        # 简单统计
-        negative_count = sum(1 for item in tagged_reviews if item["tags"].get("sentiment") == "negative")
-        return f"""<div class="stats-grid">
-            <div class="stat-card red"><div class="value">{negative_count}</div><div class="label">差评总数</div></div>
-        </div>
-        <p>差评深度分析需要 API Key 支持，当前仅显示基础统计</p>"""
-    
-    root_causes = negative_analysis.get("root_causes", [])
-    rows = ""
-    for rc in root_causes:
-        severity = rc.get("severity", "minor")
-        severity_color = "red" if severity == "critical" else "orange" if severity == "major" else "green"
-        rows += f"""<tr>
-            <td style="color:{severity_color};font-weight:600;">{severity.upper()}</td>
-            <td>{_safe(rc.get('cause', ''))}</td>
-            <td>{rc.get('frequency', 0)}</td>
-            <td>{_safe(', '.join(rc.get('examples', [])[:2]))}</td>
-        </tr>"""
-    
-    improvement_rows = ""
-    for ip in negative_analysis.get("improvement_priority", [])[:5]:
-        improvement_rows += f"""<tr>
-            <td>{_safe(ip.get('issue', ''))}</td>
-            <td>{_safe(ip.get('impact', ''))}</td>
-            <td>{_safe(ip.get('solution', ''))}</td>
-            <td><span class="badge badge-{'p0' if ip.get('effort') == 'low' else 'p1' if ip.get('effort') == 'medium' else 'p2'}">{ip.get('effort', '-')}</span></td>
-        </tr>"""
-    
-    severity = negative_analysis.get("severity_breakdown", {})
-    trend = negative_analysis.get("sentiment_trend", "stable")
-    
-    return f"""<div class="stats-grid">
-        <div class="stat-card red"><div class="value">{severity.get('critical', 0)}</div><div class="label">严重问题</div></div>
-        <div class="stat-card orange"><div class="value">{severity.get('major', 0)}</div><div class="label">主要问题</div></div>
-        <div class="stat-card"><div class="value">{severity.get('minor', 0)}</div><div class="label">次要问题</div></div>
-        <div class="stat-card"><div class="value">{trend}</div><div class="label">情感趋势</div></div>
-    </div>
-    
-    <h3>🔍 根因分析</h3>
-    <table>
-        <tr><th>严重度</th><th>根因</th><th>频率</th><th>典型评论</th></tr>
-        {rows}
-    </table>
-    
-    <h3>📋 改进优先级</h3>
-    <table>
-        <tr><th>问题</th><th>影响</th><th>解决方案</th><th>难度</th></tr>
-        {improvement_rows}
-    </table>"""
-
-
-def _render_keyword_cloud(keywords: List[str], css_class: str = "keyword-tag") -> str:
-    """渲染关键词云"""
-    if not keywords:
-        return "<p>暂无关键词数据</p>"
-    return "\n".join(f'<span class="{css_class}">{_safe(kw)}</span>' for kw in keywords[:25])
-
-
-def _render_recommended_keywords(recommended: Dict) -> str:
-    """渲染推荐关键词"""
-    html = ""
-    for category, kws in recommended.items():
-        if not kws:
-            continue
-        items = "".join(
-            f'<tr><td>{_safe(kw.get("keyword", kw.get("word", str(kw))))}</td><td>{kw.get("frequency", kw.get("type", "-"))}</td></tr>'
-            for kw in kws[:10]
-        )
-        html += f"""<h3>{category}</h3>
-        <table><tr><th>关键词</th><th>来源/频率</th></tr>{items}</table>"""
-    
-    return html or "<p>暂无推荐关键词</p>"
-
-
-def _render_voc_clusters(voc_data: Dict) -> str:
-    """渲染 VOC 聚类"""
-    clusters = voc_data.get("clusters", [])
-    if not clusters:
-        return "<p>VOC 聚类需要 API Key 支持</p>"
-    
-    html = '<div class="card-grid">'
-    for c in clusters:
-        sentiment = c.get("sentiment", "neutral")
-        emoji = "😊" if sentiment == "positive" else "😟" if sentiment == "negative" else "😐"
-        html += f"""<div class="card">
-            <h4>{emoji} {_safe(c.get('theme', 'Unknown'))}</h4>
-            <p><strong>提及次数:</strong> {c.get('mentions', 0)}</p>
-            <p><strong>洞察:</strong> {_safe(c.get('insight', ''))}</p>
-            <p><strong>建议行动:</strong> {_safe(c.get('action', ''))}</p>
-            <p style="font-size:11px;color:#999;">{_safe(', '.join(c.get('key_quotes', [])[:3]))}</p>
-        </div>"""
-    html += '</div>'
-    
-    # Customer expectations
-    expectations = voc_data.get("customer_expectations", [])
-    if expectations:
-        html += '<h3>客户期望</h3><table><tr><th>期望</th><th>重要性</th><th>满足程度</th></tr>'
-        for e in expectations:
-            html += f'<tr><td>{_safe(e.get("expectation", ""))}</td><td>{e.get("importance", "-")}</td><td>{e.get("gap", "-")}</td></tr>'
-        html += '</table>'
-    
-    # Unmet needs
-    unmet = voc_data.get("unmet_needs", [])
-    if unmet:
-        html += '<h3>未满足的需求</h3><ul>'
-        for n in unmet:
-            html += f'<li>{_safe(n)}</li>'
-        html += '</ul>'
-    
-    return html
-
-
-def _render_market_overview(overview: Dict) -> str:
-    """渲染市场概览"""
-    if not overview:
-        return ""
-    
-    return f"""<div class="stats-grid">
-        <div class="stat-card"><div class="value">{_safe(overview.get('avg_price', 'N/A'))}</div><div class="label">市场均价</div></div>
-        <div class="stat-card"><div class="value">{overview.get('avg_rating', '-')} ⭐</div><div class="label">市场均分</div></div>
-        <div class="stat-card"><div class="value">{_safe(overview.get('price_range', 'N/A'))}</div><div class="label">价格区间</div></div>
-        <div class="stat-card"><div class="value">{overview.get('competitor_count', 0)}</div><div class="label">竞品数量</div></div>
-    </div>"""
-
-
-def _render_competitors_table(competitors: List[Dict], position: Dict) -> str:
-    """渲染竞品对比表"""
-    if not competitors:
-        return "<p>暂无竞品数据</p>"
-    
-    position_html = ""
-    if position:
-        overall = position.get("overall_rank", "")
-        rank_labels = {
-            "leader": "🥇 市场领导者",
-            "challenger": "🥈 挑战者",
-            "niche": "🎯 利基玩家",
-            "new_entrant": "🆕 新进入者",
-        }
-        label = rank_labels.get(overall, overall)
-        position_html = f"""<div class="card" style="margin-bottom:16px;background:#fff8e1;border-color:#ff9900;">
-            <h4>竞争定位: {label}</h4>
-            <p>价格: {position.get('price_position', '-')} | 评分: {position.get('rating_position', '-')} | 评论: {position.get('review_count_position', '-')}</p>
-        </div>"""
-    
-    rows = ""
-    for i, c in enumerate(competitors):
-        rows += f"""<tr>
-            <td>{i+1}</td>
-            <td><a href="{_safe(c.get('url', '#'))}" target="_blank">{_safe(c.get('title', c.get('asin', 'Unknown')))[:60]}</a></td>
-            <td>{_safe(c.get('price', 'N/A'))}</td>
-            <td>{c.get('rating', '-')} ⭐</td>
-            <td>{format_number(c.get('total_reviews', 0))}</td>
-        </tr>"""
-    
-    return f"""{position_html}
-    <table>
-        <tr><th>#</th><th>产品</th><th>价格</th><th>评分</th><th>评论数</th></tr>
-        {rows}
-    </table>"""
-
-
-def _render_gap_analysis(gap: Dict) -> str:
-    """渲染差距分析"""
-    if not gap:
-        return ""
-    
-    html = '<h3>差距分析</h3>'
-    
-    pricing = gap.get("pricing_gaps", [])
-    if pricing:
-        html += '<h4>价格差距</h4><table><tr><th>竞品</th><th>差价</th><th>洞察</th></tr>'
-        for p in pricing[:5]:
-            html += f'<tr><td>{_safe(p.get("competitor", ""))[:40]}</td><td>{_safe(p.get("price_diff", ""))}</td><td>{_safe(p.get("insight", ""))}</td></tr>'
-        html += '</table>'
-    
-    feature = gap.get("feature_gaps", [])
-    if feature:
-        html += '<h4>功能差距</h4><table><tr><th>竞品</th><th>差距</th><th>建议</th></tr>'
-        for f in feature[:5]:
-            html += f'<tr><td>{_safe(f.get("competitor", ""))[:40]}</td><td>{_safe(f.get("gap", ""))}</td><td>{_safe(f.get("action", ""))}</td></tr>'
-        html += '</table>'
-    
-    return html
-
-
-def _render_opportunity_scores(scores: Dict) -> str:
-    """渲染机会评分"""
-    if not scores:
-        return ""
-    
-    breakdown = ""
-    for k, v in scores.get("breakdown", {}).items():
-        breakdown += f'<div class="stat-card"><div class="label">{k.replace("_", " ").title()}</div><div style="font-size:12px;color:#666;">{_safe(v)}</div></div>'
-    
-    return f"""<div class="stats-grid">
-        <div class="stat-card orange"><div class="value">{scores.get('overall_score', '-')}/10</div><div class="label">综合机会评分</div></div>
-    </div>
-    <div class="stats-grid">{breakdown}</div>"""
-
-
-def _render_market_gaps(gaps: List[Dict]) -> str:
-    """渲染市场缺口"""
-    if not gaps:
-        return ""
-    
-    html = '<h3>市场缺口识别</h3><div class="card-grid">'
-    for g in gaps[:6]:
-        effort_color = {"low": "green", "medium": "orange", "high": "red"}.get(g.get("effort", ""), "gray")
-        html += f"""<div class="card" style="border-left: 4px solid {effort_color};">
-            <h4>{_safe(g.get('gap', ''))[:80]}</h4>
-            <p>{_safe(g.get('opportunity', ''))}</p>
-            <span class="badge badge-p2">难度: {g.get('effort', '-')}</span>
-        </div>"""
-    html += '</div>'
-    return html
-
-
-def _render_niche_opportunities(niches: List[Dict]) -> str:
-    """渲染利基机会"""
-    if not niches:
-        return ""
-    
-    html = '<h3>利基市场机会</h3><table><tr><th>利基方向</th><th>目标用户</th><th>市场规模</th><th>竞争程度</th><th>切入策略</th></tr>'
-    for n in niches[:5]:
-        html += f"""<tr>
-            <td>{_safe(n.get('niche', ''))[:50]}</td>
-            <td>{_safe(n.get('target_audience', ''))}</td>
-            <td>{_safe(n.get('market_size_estimate', '-'))}</td>
-            <td>{_safe(n.get('competition_level', '-'))}</td>
-            <td>{_safe(n.get('entry_strategy', ''))[:60]}</td>
-        </tr>"""
-    html += '</table>'
-    return html
-
-
-def _render_risk_assessment(risks: Dict) -> str:
-    """渲染风险评估"""
-    if not risks:
-        return ""
-    
-    risk_list = risks.get("risks", [])
-    if not risk_list:
-        return ""
-    
-    level_colors = {"high": "#f44336", "medium": "#ff9800", "low": "#4caf50"}
-    overall_level = risks.get("overall_risk_level", "medium")
-    
-    html = f"""<h3>⚠️ 风险评估 <span class="badge badge-{'p0' if overall_level == 'high' else 'p1' if overall_level == 'medium' else 'p2'}">{overall_level.upper()}</span></h3>
-    <table><tr><th>风险</th><th>等级</th><th>应对策略</th></tr>"""
-    
-    for r in risk_list:
-        level = r.get("level", "low")
-        html += f"""<tr>
-            <td>{_safe(r.get('risk', ''))}</td>
-            <td><span style="color:{level_colors.get(level, '#999')};font-weight:600;">{level.upper()}</span></td>
-            <td>{_safe(r.get('mitigation', ''))}</td>
-        </tr>"""
-    
-    html += '</table>'
-    return html
-
-
-def _render_action_plan(plan: Dict) -> str:
-    """渲染行动计划"""
-    if not plan:
-        return "<p>暂无行动计划</p>"
-    
-    html = ""
-    
-    immediate = plan.get("immediate_actions", [])
-    if immediate:
-        html += '<h3>⚡ 立即行动</h3><ul class="priority-list">'
-        for a in immediate:
-            html += f"""<li class="p0">
-                <strong>{_safe(a.get('action', ''))}</strong><br>
-                <span style="font-size:12px;color:#888;">{_safe(a.get('detail', ''))} | 时间: {_safe(a.get('timeline', ''))} | 预期: {_safe(a.get('expected_result', ''))}</span>
-            </li>"""
-        html += '</ul>'
-    
-    short_term = plan.get("short_term", [])
-    if short_term:
-        html += '<h3>📅 短期计划 (1-4周)</h3><ul class="priority-list">'
-        for a in short_term:
-            html += f"""<li class="p1">
-                <strong>{_safe(a.get('action', ''))}</strong><br>
-                <span style="font-size:12px;color:#888;">{_safe(a.get('detail', ''))} | 时间: {_safe(a.get('timeline', ''))} | 预期: {_safe(a.get('expected_result', ''))}</span>
-            </li>"""
-        html += '</ul>'
-    
-    long_term = plan.get("long_term", [])
-    if long_term:
-        html += '<h3>🔭 长期规划 (1-3月)</h3><ul class="priority-list">'
-        for a in long_term:
-            html += f"""<li class="p2">
-                <strong>{_safe(a.get('action', ''))}</strong><br>
-                <span style="font-size:12px;color:#888;">{_safe(a.get('detail', ''))} | 时间: {_safe(a.get('timeline', ''))} | 预期: {_safe(a.get('expected_result', ''))}</span>
-            </li>"""
-        html += '</ul>'
-    
-    return html
 
 
 if __name__ == "__main__":
-    print("报告生成器已加载")
+    print("报告生成模块已加载")
